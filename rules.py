@@ -1,5 +1,6 @@
 from pathlib import Path
 import mimetypes
+import filetype
 
 file_types = {
     'image': ['jpg', 'png', 'gif', 'tif', 'bmp', 'svg'],
@@ -10,11 +11,6 @@ file_types = {
     'spreadsheets': ['xlsx', 'csv', 'ods'],
     'archives': ['zip', 'rar', '7z', 'tar', 'gz']
 }
-
-def categorise_file(file: Path):
-    for type in file_types:
-        if file.suffix[1:] in file_types[type]:
-            return file.name, type
 
 if __name__ == "__main__":
     pass

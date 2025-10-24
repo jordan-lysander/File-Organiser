@@ -1,17 +1,26 @@
-from pathlib import Path
+import os
 import mimetypes
 import filetype
-import win32com.client
+from pathlib import Path
+import re
 
 def get_mime(file: Path):
-    mime = mimetypes.guess_type(file)[0]
-    if mime == None:
-        mime = filetype.guess_mime(file)
-    
-    return mime
+    try:
+        mime = mimetypes.guess_type(file)[0]
+        if mime == None:
+            mime = filetype.guess_mime(file)
+        return mime
+    except (PermissionError, OSError, TypeError):
+        return None
 
-def categorise(organised_files: dict[str: list], file: Path):
-    category, suffix = get_mime(file).split('/')
+def categorise(organised_files: dict[str, list], file: Path):
+    mime = get_mime(file).split('/')
+
+    if mime:
+        category = mime.split('/')[0]
+    else:
+        category = 'other'
+
     if category not in organised_files.keys():
         organised_files[category] = [file]
     else:
@@ -26,36 +35,21 @@ def scan_directory(organised_files: dict, path: Path):
 
         categorise(organised_files, file)
 
-def create_new_paths(organised_files: dict, root: Path):
-    shell = win32com.client.Dispatch("WScript.Shell")
-    for category, files in organised_files.items():
-        new_dir = root / category
-        new_dir.mkdir(exist_ok=True)
+def clean_filename():
+    # file = str(filename.stem)
+    file = "483428122_623339390852966_8917901137371630320_n..1741875441878.publer.com"
+    print(f"Original: {file}")
 
-        for file in files:
-            shortcut_path = new_dir / (file.name + ".lnk")
+    # remove all numbers 7 or more characters long
+    new = re.sub(r'\d{7,}', '', file)
+    # remove all instances of domain names
+    new = re.sub(r'\b[a-zA-Z0-9-]+\.(com|net|org|co\.uk)\b', '', new)
+    # replace delimiters with spaces
+    new = re.sub(r'[-_\.]+', ' ', new)
+    # remove any extra spaces
+    new = re.sub(r'\s+', ' ', new).strip()
 
-            if not shortcut_path.exists():
-                shortcut = shell.CreateShortCut(str(shortcut_path))
-                shortcut.TargetPath = str(file.absolute())
-                shortcut.save()
-        
-def main():
-    organised_files = {}
-
-    target_path = Path(input("Choose the directory to analyse: "))
-
-    new_dir = target_path.parent / 'Root (organised)'
-    new_dir.mkdir(exist_ok=True)
-
-    scan_directory(organised_files, target_path)
-    create_new_paths(organised_files, new_dir)
-
-    print(organised_files)
-
-    # for stem, suffix in files:
-        # print(f"{stem}{suffix}")
+    print(f"Cleaned: {new}")
 
 if __name__ == "__main__":
-    main()
-        
+    clean_filename()
