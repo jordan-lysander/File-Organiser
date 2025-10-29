@@ -4,13 +4,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def create_new_paths(organised_files: dict, root: Path):
+def create_new_paths(organised_files: dict, root: Path, dry_run: bool):
     # create a shell instance to generate the shortcuts
-    shell = win32com.client.Dispatch("WScript.Shell")
+    if not dry_run:
+        shell = win32com.client.Dispatch("WScript.Shell")
 
     for category, files in organised_files.items():
         new_dir = root / category
-        new_dir.mkdir(exist_ok=True)
+        if not dry_run:
+            new_dir.mkdir(exist_ok=True)
         logger.info(f"Validated category directory: {new_dir}")
 
         for file in files:
@@ -25,7 +27,10 @@ def create_new_paths(organised_files: dict, root: Path):
                 shortcut_path = new_dir / new_name
                 counter += 1
 
-            shortcut = shell.CreateShortCut(str(shortcut_path))
-            shortcut.TargetPath = str(file.absolute())
-            shortcut.save()
-            logger.info(f"Created shortcut for '{file.name}' at '{shortcut_path}'")
+            if dry_run:
+                logger.info(f"[DRY RUN] Would create shortcut for '{file.name}' at '{shortcut_path}'")
+            else:
+                shortcut = shell.CreateShortCut(str(shortcut_path))
+                shortcut.TargetPath = str(file.absolute())
+                shortcut.save()
+                logger.info(f"Created shortcut for '{file.name}' at '{shortcut_path}'")
