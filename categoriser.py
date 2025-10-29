@@ -3,6 +3,9 @@ import mimetypes
 import filetype
 from pathlib import Path
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_mime(file: Path):
     try:
@@ -14,42 +17,55 @@ def get_mime(file: Path):
         return None
 
 def categorise(organised_files: dict[str, list], file: Path):
-    mime = get_mime(file).split('/')
+    mime = get_mime(file)
 
     if mime:
         category = mime.split('/')[0]
     else:
         category = 'other'
+        logger.warning(f"Unable to determine MIME type for '{file.name}'. Placing in 'other'.")
 
     if category not in organised_files.keys():
         organised_files[category] = [file]
     else:
         organised_files[category].append(file)
+    logger.debug(f"Categorised '{file.name}' as '{category}'")
 
 def scan_directory(organised_files: dict, path: Path):
+    logger.info(f"Scanning directory: {path}")
     for file in path.rglob("*"):
         if not file.is_file():
             continue
 
         print(f"File: {file.name}")
 
+        file = clean_filename(file)
+
         categorise(organised_files, file)
 
-def clean_filename():
-    # file = str(filename.stem)
-    file = "483428122_623339390852966_8917901137371630320_n..1741875441878.publer.com"
-    print(f"Original: {file}")
+def clean_filename(file: Path):
+    filename = str(file.stem)
+    print(f"Original: {filename}")
 
     # remove all numbers 7 or more characters long
-    new = re.sub(r'\d{7,}', '', file)
-    # remove all instances of domain names
-    new = re.sub(r'\b[a-zA-Z0-9-]+\.(com|net|org|co\.uk)\b', '', new)
-    # replace delimiters with spaces
-    new = re.sub(r'[-_\.]+', ' ', new)
-    # remove any extra spaces
-    new = re.sub(r'\s+', ' ', new).strip()
+    clean_filename = re.sub(r'\d{7,}', '', filename)
 
-    print(f"Cleaned: {new}")
+    # remove all instances of domain names
+    clean_filename = re.sub(r'\b[a-zA-Z0-9-]+\.(com|net|org|co\.uk)\b', '', clean_filename)
+
+    # replace delimiters with spaces
+    clean_filename = re.sub(r'[-_\.]+', ' ', clean_filename)
+
+    # remove any extra spaces
+    clean_filename = re.sub(r'\s+', ' ', clean_filename).strip()
+
+    # capitalise the first letter of each word IF the word is all lowercase
+    clean_filename = re.sub(r'\b\w+\b',
+                            lambda m: m.group(0).capitalize() if m.group(0).islower() else m.group(0),
+                            clean_filename)
+
+    print(f"Cleaned: {clean_filename}")
+    return file.with_stem(clean_filename)
 
 if __name__ == "__main__":
     clean_filename()
