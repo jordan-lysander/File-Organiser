@@ -1,8 +1,8 @@
-import os
 import mimetypes
 import filetype
 from pathlib import Path
-import re
+from renamer import clean_filename
+from ai_renamer import rename_with_ai
 import logging
 from rules import EXTENSION_TO_CATEGORY as ext_to_cat
 
@@ -32,7 +32,7 @@ def get_mime(file: Path):
         # --- LAYER 3: If all else fails, return None
         return None
     
-    except (PermissionError, OSError, TypeError):
+    except (PermissionError, OSError):
         logger.warning(f"Permission denied while trying to read '{file.name}'")
         return None
     
@@ -66,7 +66,7 @@ def categorise(organised_files: dict[str, list], file: Path):
 
     logger.debug(f"Categorised '{file.name}' as '{category}'")
 
-def scan_directory(organised_files: dict, path: Path):
+def scan_directory(organised_files: dict, path: Path, settings: dict):
     logger.info(f"Scanning directory: {path}")
     for file in path.rglob("*"):
         if not file.is_file():
@@ -74,33 +74,14 @@ def scan_directory(organised_files: dict, path: Path):
 
         print(f"File: {file.name}")
 
-        file = clean_filename(file)
+        if settings.get('ai_mode'):
+            new_name = rename_with_ai(file, settings.get('ai_model'))
+            if new_name:
+                file = file.with_stem(new_name)
+        else:
+            file = clean_filename(file)
 
         categorise(organised_files, file)
-
-def clean_filename(file: Path):
-    filename = str(file.stem)
-    print(f"Original: {filename}")
-
-    # remove all numbers 7 or more characters long
-    clean_filename = re.sub(r'\d{7,}', '', filename)
-
-    # remove all instances of domain names
-    clean_filename = re.sub(r'\b[a-zA-Z0-9-]+\.(com|net|org|co\.uk)\b', '', clean_filename)
-
-    # replace delimiters with spaces
-    clean_filename = re.sub(r'[-_\.]+', ' ', clean_filename)
-
-    # remove any extra spaces
-    clean_filename = re.sub(r'\s+', ' ', clean_filename).strip()
-
-    # capitalise the first letter of each word IF the word is all lowercase
-    clean_filename = re.sub(r'\b\w+\b',
-                            lambda m: m.group(0).capitalize() if m.group(0).islower() else m.group(0),
-                            clean_filename)
-
-    print(f"Cleaned: {clean_filename}")
-    return file.with_stem(clean_filename)
 
 if __name__ == "__main__":
     clean_filename()

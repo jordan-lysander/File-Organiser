@@ -1,5 +1,4 @@
 from pathlib import Path
-import win32com.client
 import logging
 
 logger = logging.getLogger(__name__)
@@ -7,6 +6,7 @@ logger = logging.getLogger(__name__)
 def create_new_paths(organised_files: dict, root: Path, dry_run: bool):
     # create a shell instance to generate the shortcuts
     if not dry_run:
+        import win32com.client
         shell = win32com.client.Dispatch("WScript.Shell")
 
     for category, files in organised_files.items():

@@ -10,8 +10,8 @@ DEFAULT_RULES = {
     'audio': ['mp3', 'wav', 'aac', 'ogg', 'flac', 'midi'],
     'document': ['docx', 'pdf', 'txt', 'odt'],
     'presentation': ['pptx', 'odp'],
-    'spreadsheets': ['xlsx', 'csv', 'ods'],
-    'archives': ['zip', 'rar', '7z', 'tar', 'gz']
+    'spreadsheet': ['xlsx', 'csv', 'ods'],
+    'archive': ['zip', 'rar', '7z', 'tar', 'gz']
 }
 
 def load_rules(config_path='config.ini'):

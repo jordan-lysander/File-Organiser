@@ -4,6 +4,7 @@ import categoriser as cat
 import mover
 from pathlib import Path
 import logging
+import configparser
 
 def init_logger():
     logging.basicConfig(
@@ -22,8 +23,24 @@ def init_argparser():
     parser.add_argument("--dry-run", action="store_true", help="Simulate the organisation without affecting files.")
     return parser.parse_args()
 
+def load_settings(config_path='config.ini'):
+    config = configparser.ConfigParser()
+    config.read(config_path)
+
+    settings = {}
+
+    if 'settings' in config:
+        settings['ai_mode'] = config['settings'].getboolean('ai_mode', fallback=False)
+        settings['ai_model'] = config['settings'].get('ai_model', fallback='')
+        settings['operation_mode'] = config['settings'].get('operation_mode', fallback='shortcut')
+        settings['dry_run'] = config['settings'].getboolean('dry_run', fallback=False)
+        settings['destination'] = config['settings'].get('destination', fallback='')
+
+    return settings
+
 def main():
     init_logger()
+    config_settings = load_settings()
     organised_files = {}
 
     # If command line arguments were provided...
@@ -31,7 +48,8 @@ def main():
         # --- Non-interactive mode ---
         args = init_argparser()
         target_path = args.source
-        dry_run = args.dry_run
+
+        dry_run = args.dry_run or config_settings.get('dry_run', False)
 
         if args.destination:
             new_dir = args.destination
@@ -58,7 +76,7 @@ def main():
     new_dir.mkdir(exist_ok=True)
     logging.info(f"Output directory set to: '{new_dir}'")
 
-    cat.scan_directory(organised_files, target_path)
+    cat.scan_directory(organised_files, target_path, config_settings)
     mover.create_new_paths(organised_files, new_dir, dry_run=dry_run)
 
     logging.info('Script finished successfully.')
