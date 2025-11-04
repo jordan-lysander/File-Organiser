@@ -1,70 +1,72 @@
 import sys
 import argparse
-import categoriser as cat
-import mover
-from pathlib import Path
 import logging
-import configparser
+from pathlib import Path
+from collections import defaultdict
 
-def init_logger():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-        filename='file_organiser.log',
-        filemode='w'
-    )
+from metadata import get_category
+from renamer import get_clean_name
 
-    logging.info('File Organiser script started.')
+from llm_handler.client import Client
+from llm_handler.planner import Planner
+
+from executor import execute_plan
+import config
+from file_operation import FileOperation
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    filename='file_organiser.log',
+    filemode='w'
+)
+logging.info('File Organiser script started.')
+logger = logging.getLogger(__name__)
 
 def init_argparser():
     parser = argparse.ArgumentParser(description="Organise files in a directory by category.")
     parser.add_argument("source", type=Path, help="The source directory to organise.")
     parser.add_argument("-d", "--destination", type=Path, default=None, help="The destination directory for organised files.")
     parser.add_argument("--dry-run", action="store_true", help="Simulate the organisation without affecting files.")
-    return parser.parse_args()
+    return parser
 
-def load_settings(config_path='config.ini'):
-    config = configparser.ConfigParser()
-    config.read(config_path)
-
-    settings = {}
-
-    if 'settings' in config:
-        settings['ai_mode'] = config['settings'].getboolean('ai_mode', fallback=False)
-        settings['ai_model'] = config['settings'].get('ai_model', fallback='')
-        settings['operation_mode'] = config['settings'].get('operation_mode', fallback='shortcut')
-        settings['dry_run'] = config['settings'].getboolean('dry_run', fallback=False)
-        settings['destination'] = config['settings'].get('destination', fallback='')
-
-    return settings
+def scan_files(path: Path):
+    """Generator that scans a directory and yields the files"""
+    logger.info(f"Scanning directory: '{path}'")
+    for file in path.rglob('*'):
+        if file.is_file():
+            yield file
 
 def main():
-    init_logger()
-    config_settings = load_settings()
-    organised_files = {}
+    parser = init_argparser()
+    op_mode = config.OPERATION_MODE
 
     # If command line arguments were provided...
     if len(sys.argv) > 1:
-        # --- Non-interactive mode ---
-        args = init_argparser()
+        # --- Non-interactive mode (Command-line arguments) ---
+        args = parser.parse_args()
         target_path = args.source
+        dry_run = args.dry_run or config.DRY_RUN
 
-        dry_run = args.dry_run or config_settings.get('dry_run', False)
-
-        if args.destination:
+        if op_mode == 'rename':
+            new_dir = target_path
+        elif args.destination:
             new_dir = args.destination
+        elif config.DESTINATION:
+            new_dir = Path(config.DESTINATION)
         else:
             new_dir = target_path.parent / f'{target_path.name} (organised)'
-
-        if dry_run:
-            logging.info("--- DRY RUN MODE ENABLED ---")
     else:
         # --- Interactive mode (CLI prompts) ---
         print("--- File Organiser ---")
         target_path = Path(input("Enter the path of the directory to organise: "))
         dry_run = False
 
-        new_dir = target_path.parent / f'{target_path.name} (organised)'
+        if op_mode == 'rename':
+            new_dir = target_path
+        else:
+            new_dir = target_path.parent / f'{target_path.name} (organised)'
+        print(f"Output will be placed in: {new_dir}")
 
     if not target_path.is_dir():
         logging.error(f"Source path '{target_path}' is not a valid directory. Exiting...")
@@ -72,15 +74,94 @@ def main():
         return
     
     logging.info(f"Target directory selected: '{target_path}'")
+    if dry_run:
+            logging.info("--- DRY RUN MODE ENABLED ---")
 
-    new_dir.mkdir(exist_ok=True)
-    logging.info(f"Output directory set to: '{new_dir}'")
+    # --- 1. Build the plan
+    plan: list[FileOperation] = []
+    print("\nScanning and planning operations...")
+    if config.AI_MODE:
+        # initialise the llm client and planner
+        llm_client = Client(base_url=config.AI_SERVER, model=config.AI_MODEL)
+        planner = Planner(llm_client)
 
-    cat.scan_directory(organised_files, target_path, config_settings)
-    mover.create_new_paths(organised_files, new_dir, dry_run=dry_run)
+        # Holistic AI path: collect all files, ask AI for categories and per-category consistent renames
+        all_files = [f for f in scan_files(target_path)]
+        file_by_name = {f.name: f for f in all_files}
+        logger.info(f"Scanned files: {len(all_files)}")
+
+        global_plan = planner.plan_global(all_files)
+
+        assignments = global_plan.get("assignments", {})
+        # Build id->Path map identical to planner
+        import hashlib
+        def _make_id(path: Path) -> str:
+            h = hashlib.blake2b(digest_size=8)
+            try:
+                h.update(path.name.encode("utf-8", "ignore"))
+                st = path.stat()
+                h.update(str(st.st_size).encode())
+                h.update(str(int(st.st_mtime)).encode())
+            except Exception:
+                pass
+            return h.hexdigest()
+
+        by_id = {_make_id(p): p for p in all_files}
+        plan: list[FileOperation] = []
+
+        for fid, a in assignments.items():
+            p = by_id.get(fid)
+            if not p:
+                continue
+            rel_folder = a["folder"]  # e.g., "Documents/Essays"
+            stem = a["stem"]
+            final_name = f"{stem}{p.suffix}"
+            # Use nested folder path via category field (executor joins with dest_root)
+            plan.append(FileOperation(source_path=p, category=rel_folder, final_name=final_name))
+
+        execute_plan(plan, new_dir, op_mode, dry_run)
+
+
+        print("  - Asking AI to plan categories holistically...")
+        category_plan = planner.plan_categories(all_files)
+        if not category_plan:
+            logger.error("AI category planning failed; aborting.")
+            return
+
+        # Group by category according to AI plan
+        grouped: dict[str, list[Path]] = defaultdict(list)
+        for fname, cat in category_plan.items():
+            p = file_by_name.get(fname)
+            if p is not None:
+                grouped[cat].append(p)
+
+        logger.info(f"Planned by category: " + ", ".join(f"{k}={len(v)}" for k, v in grouped.items()))
+
+        print("  - Asking AI to plan renames per category...")
+        rename_plan = planner.plan_renames(grouped)
+
+        # Build operations from AI plans
+        for cat, paths in grouped.items():
+            for p in paths:
+                stem = rename_plan.get(p.name)
+                new_name = f"{stem}{p.suffix}" if stem else None
+                plan.append(FileOperation(source_path=p, category=cat, new_name=new_name))
+
+        logger.info(f"Total operations planned: {len(plan)}")
+    else:
+        # Rule-based path: process file-by-file
+        for file in scan_files(target_path):
+            print(f"  - Processing: {file.name}")
+            category = get_category(file)
+            new_name = None if op_mode == 'shortcut' else get_clean_name(file)
+            plan.append(FileOperation(source_path=file, category=category, new_name=new_name))
+
+    # --- 2. Execute the plan
+    print("\nExecuting plan...")
+    execute_plan(plan, new_dir, op_mode, dry_run)
 
     logging.info('Script finished successfully.')
-    print("Organisation complete. Check file_organiser.log for details.")
+    print("\nOperation complete. Check file_organiser.log for details.")
 
 if __name__ == "__main__":
     main()

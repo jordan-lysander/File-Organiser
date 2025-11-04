@@ -1,9 +1,8 @@
 from pathlib import Path
 import re
 
-def clean_filename(file: Path):
-    filename = str(file.stem)
-    print(f"Original: {filename}")
+def get_clean_name(file: Path):
+    filename = file.stem
 
     # remove all numbers 7 or more characters long
     clean_filename = re.sub(r'\d{7,}', '', filename)
@@ -18,9 +17,8 @@ def clean_filename(file: Path):
     clean_filename = re.sub(r'\s+', ' ', clean_filename).strip()
 
     # capitalise the first letter of each word IF the word is all lowercase
-    clean_filename = re.sub(r'\b\w+\b',
-                            lambda m: m.group(0).capitalize() if m.group(0).islower() else m.group(0),
-                            clean_filename)
-
-    print(f"Cleaned: {clean_filename}")
-    return file.with_stem(clean_filename)
+    clean_filename = ' '.join(word.capitalize() for word in clean_filename.split())
+    
+    if clean_filename and clean_filename != filename:
+        return clean_filename + file.suffix
+    return None
