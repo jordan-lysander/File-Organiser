@@ -1,7 +1,12 @@
 import logging
 from pathlib import Path
 from metadata import Metadata
-import pymupdf
+from keybert import KeyBERT
+from local_llm import LocalLLM
+from config import AI_MODEL
+
+llm = LocalLLM()
+kw_model = KeyBERT()
 
 logger = logging.getLogger(__name__)
 
@@ -9,13 +14,15 @@ class FileInfo:
     def __init__(self, file: Path):
         self.metadata               = Metadata(file)
         self.summary: str | None    = None
-        self.keywords: list[str]    = []
+        self.keywords               = []
+
+        self.analyse_content(file)
 
     def analyse_content(self, file: Path):
         mime = self.metadata.mime
         if mime.startswith('text/') or mime in ('application/pdf', 'application/msword'):
             text = self._extract_text(file)
-            self.summary, self.keywords = self._summarise_text(text)
+            self.summary, self.keywords = llm.summarise_text(text)
 
     def _extract_text(self, file: Path):
         ext = self.metadata.extension
@@ -33,12 +40,11 @@ class FileInfo:
                 return " ".join(p.text for p in doc.paragraphs[:30])
         except Exception as e:
             logger.error(f"Unknown error occured: {e}")
-            return ""
+        return ""
 
-    def _summarise_text(self, text: str):
-        if not text.strip():
-            logger.error(f"Empty or unreadable text")
-            return ""
-
-        trimmed = text[:2000]
-        summary = summariser(trimmed, max_length=80, min_length=25, do_sample=False)
+if __name__ == "__main__":
+    file = Path('Root/JLH CV MVE 2025.03.24.pdf')
+    file_info = FileInfo(file)
+    print(file_info.summary)
+    
+    
